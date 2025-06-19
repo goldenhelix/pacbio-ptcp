@@ -1,0 +1,10 @@
+{
+    "compilerOptions": {
+      "target": "es6",
+      "module": "commonjs",
+      "checkJs": true, // Enables type checking for JS files
+      "esModuleInterop": true
+    },
+    "include": ["**/*"] // Adjust the path as needed
+  }
+  

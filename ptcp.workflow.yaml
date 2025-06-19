@@ -1,0 +1,133 @@
+name: PureTarget Carrier Pipeline Workflow 
+description: Complete PureTarget Carrier Pipeline analysis workflow for sample processing
+stages:
+  - name: PTCP Analysis
+    description: Process sample with PureTarget Carrier Pipeline
+    task_path: ptcp.task.yaml
+    retry_count: 2
+    depends_on: []
+
+    batch_file_parameter:
+      path:
+        file: ""
+      
+    task_parameters:
+      - name: input_folder 
+        label: Input Folder
+        type: directory
+
+      - name: output_folder 
+        label: Output Folder
+        type: directory
+
+      - name: ref_fasta
+        label: Reference File (FASTA)
+        type: file
+        optional: true
+
+      - name: paraphase_config
+        label: Paraphase Config File
+        group: Advanced Options
+        type: file
+        value: "Automation/Workflows/PacBio PureTarget/Meta/paraphase/paraphase_config.GRCh38.yaml"
+      
+      - name: ptcp_qc_bed
+        label: ptcp-qc BED
+        group: Advanced Options
+        type: file
+        value: "Automation/Workflows/PacBio PureTarget/Meta/ptcp-qc/ptcp-qc.GRCh38.bed"
+
+      - name: trgt_panel_bed
+        label: TRGT Panel BED
+        group: Advanced Options
+        type: file
+        value: "Automation/Workflows/PacBio PureTarget/Meta/trgt/PureTarget_repeat_expansion_panel_2.0.repeat_definition.GRCh38.bed"
+
+  - name: Long-Read Variant Calling
+    description: Variant calling with Sentieon DNAscope Long-Read
+    task_path: sention_cli_long_read.task.yaml
+    retry_count: 2
+    depends_on:
+      - PTCP Analysis
+
+    glob_parameter:
+      label: PTCP Output Folder
+      path:
+        type: stage
+        stage: PTCP Analysis
+        parameter: output_folder
+      glob_ex: '*.mapped.bam'
+      output_parameters:
+        - task_parameter_name: input_file
+          expression: '${0}'
+        - task_parameter_name: sample_name
+          expression: '${1}'
+
+    task_parameters:
+    
+      - name: output_folder
+        label: Output Folder
+        type: stage
+        stage: PTCP Analysis
+        stage_parameter_expression: "${output_folder}"
+
+      - name: bed_file
+        label: Region BED File
+        type: file
+        optional: true
+        value: Automation/Workflows/PacBio PureTarget/Meta/PureTarget-carrier-v2.GRCh38.bed
+
+      - name: tech
+        label: Sequencing Technology
+        type: stage
+        stage_parameter_expression: "HiFi"
+
+      - name: ref_fasta
+        label: Reference File (FASTA)
+        type: stage
+        stage: PTCP Analysis
+        stage_parameter_expression: "${ref_fasta}"
+
+      - name: gvcf
+        group: Advanced Options
+        label: Generate gVCF
+        help: Generate a gVCF output file along with the VCF
+        type: stage
+        stage_parameter_expression: "false"
+
+      - name: skip_svs
+        group: Advanced Options
+        label: Skip SVs
+        help: Skip structural variant calling
+        type: stage
+        stage_parameter_expression: "true"
+
+      - name: skip_mosdepth
+        group: Advanced Options
+        label: Skip Mosdepth QC
+        help: Skip QC with mosdepth
+        type: boolean
+        value: "true"
+
+  - name: VSPipeline Analysis
+    description: Create a project and run the PTCP report in VarSeq
+    task_path: ptcp_vspipeline.task.yaml
+    depends_on:
+      - Long-Read Variant Calling
+    
+    task_parameters:
+      - name: base_path
+        label: Input Folder
+        type: stage
+        stage: Long-Read Variant Calling
+        stage_parameter_expression: "${output_folder}"
+
+      - name: project_name
+        label: Project Name
+        value: "PTCP Project"
+        type: string
+
+      - name: project_template
+        label: VarSeq Project Template
+        type: file
+        value: "AppData/VarSeq/User Data/ProjectTemplates/PacBio_PureTarget_GRCh38.vsproject-template"

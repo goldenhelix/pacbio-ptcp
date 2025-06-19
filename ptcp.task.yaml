@@ -1,0 +1,119 @@
+name: PureTarget Carrier Pipeline
+description: PureTarget Carrier Pipeline analysis for a single sample
+
+parameters:
+  - name: sample_name
+    label: Sample Name
+    type: string
+    optional: false
+
+  - name: input_folder
+    label: Input Folder
+    type: directory
+
+  - name: output_folder
+    label: Output Folder
+    type: directory
+
+  - name: ref_fasta
+    label: Reference File (FASTA)
+    type: file
+    optional: true
+    
+  - name: sample_sex
+    value: "None"
+    label: Sample Sex
+    type: enum
+    choices: [M, F]
+    optional: false
+
+  - name: paraphase_config
+    label: Paraphase Config File
+    group: Advanced Options
+    type: file
+    value: "Automation/Workflows/PacBio PureTarget/Meta/paraphase/paraphase_config.GRCh38.yaml"
+  
+  - name: ptcp_qc_bed
+    label: ptcp-qc BED
+    group: Advanced Options
+    type: file
+    value: "Automation/Workflows/PacBio PureTarget/Meta/ptcp-qc/ptcp-qc.GRCh38.bed"
+
+  - name: trgt_panel_bed
+    label: TRGT Panel BED
+    group: Advanced Options
+    type: file
+    value: "Automation/Workflows/PacBio PureTarget/Meta/trgt/PureTarget_repeat_expansion_panel_2.0.repeat_definition.GRCh38.bed"
+
+agent_requirements:
+  cpu_cores: 16
+  memory_gb: 32
+
+steps:
+  - name: ptcp
+    description: Run ptcp
+    type: cmd
+    docker:
+      image: registry.goldenhelix.com/public/ptcp:v2.2.0
+    args:
+      - |-
+        set -euo pipefail
+
+        mkdir -p "$output_folder" || { echo "Failed to create output directory"; exit 1; }
+
+        if [ -z "$ref_fasta" ]; then
+          ref_fasta="$WORKSPACE_DIR/${RESOURCES_PATH}/${REFERENCE_PATH}"
+        fi
+
+        # Print info
+        echo "*************************"
+        echo "Running PTCP..."
+        echo "Sample:           $sample_name"
+        echo "Sex:              $sample_sex"
+        echo "Input BAM:        $input_folder/${sample_name}.bam"
+        echo "Output Folder:    $output_folder"
+        echo "Reference:        $ref_fasta"
+        echo "Paraphase Config: $paraphase_config"
+        echo "TRGT BED:         $trgt_panel_bed"
+        echo "PTCP QC BED:      $ptcp_qc_bed"
+        echo "*************************"
+
+        workdir="/scratch"
+        cd "$workdir" || { echo "Failed to change to output directory"; exit 1; }
+        
+        # Copy input files to workdir for better performance
+        echo "Available space in workdir: $(df -h /scratch | awk 'NR==2 {print $4}')"
+        echo "Copying input files to workdir..."
+        cp "$input_folder/${sample_name}.bam"* . || { echo "Failed to copy input files to workdir"; exit 1; }
+
+        mkdir -p output || { echo "Failed to create scratch output directory"; exit 1; }
+
+        start_time=$SECONDS
+
+        ptcp_direct.sh \
+          -i "${sample_name}.bam" \
+          -s "$sample_name" \
+          -x $sample_sex \
+          -r "$ref_fasta" \
+          -t "$trgt_panel_bed" \
+          -p "$paraphase_config" \
+          -g 38 \
+          -q "$ptcp_qc_bed" \
+          -o output
+
+        # Sort and index the .trgt.vcf file
+        bcftools sort -T /scratch/ -o "output/${sample_name}.trgt.vcf.gz" -O z "output/${sample_name}.trgt.vcf" || { echo "Failed to sort VCF"; exit 1; }
+        rm "output/${sample_name}.trgt.vcf" || { echo "Failed to remove uncompressed VCF"; exit 1; }
+        tabix -p vcf "output/${sample_name}.trgt.vcf.gz" || { echo "Failed to sort and index VCF"; exit 1; }
+
+        # Unzip every *_allele.trgt_plots.zip file in the outputs/ folder
+        mkdir output/motifs_allele.trgt_plots
+        find output -name "*.trgt_plots.zip" -type f | while read -r zip_file; do
+          unzip -o "$zip_file" -d "$(dirname "$zip_file")/motifs_allele.trgt_plots"
+        done
+
+        cp -R output/* "$output_folder/" || { echo "Failed to copy results to output folder"; exit 1; }
+
+        duration=$((SECONDS - start_time))
+        echo "${sample_name} processed in $duration seconds"
+        
