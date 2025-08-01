@@ -15,14 +15,17 @@ stages:
       - name: input_folder 
         label: Input Folder
         type: directory
+        supports_location_mode: 'read_only'
 
       - name: output_folder 
         label: Output Folder
         type: directory
+        supports_location_mode: 'no_append'
 
       - name: ref_fasta
         label: Reference File (FASTA)
         type: file
+        supports_location_mode: 'read_only'
         optional: true
 
       - name: paraphase_config
@@ -124,8 +127,9 @@ stages:
 
       - name: project_name
         label: Project Name
-        value: "PTCP Project"
+        help: The name of the VarSeq project to create
         type: string
+        optional: true
 
       - name: project_template
         label: VarSeq Project Template

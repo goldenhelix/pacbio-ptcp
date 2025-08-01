@@ -9,23 +9,39 @@ agent_requirements:
 parameters:
   - name: base_path
     label: Input Folder
-    help: The input folder of vcf.gz files to analyze
+    help: The input folder of vcf.gz files to import
     type: directory
+    supports_location_mode: 'read_only'
+
+  - name: project_directory
+    label: Project Directory
+    help: The directory where the VarSeq project will be created
+    type: directory
+    supports_location_mode: 'read_write'
+    value: AppData/Projects
 
   - name: project_name
     label: Project Name
-    value: VSProject
+    help: The name of the VarSeq project to create
     type: string
+    optional: true
 
   - name: project_template
-    label: VarSeq Project Template
+    label: Project Template
+    help: The template to use for the VarSeq project
     type: file
-    path: AppData/VarSeq/User Data/ProjectTemplates/
-    value: AppData/VarSeq/User Data/ProjectTemplates/PacBio_PureTarget_GRCh38.vsproject-template
+    supports_location_mode: 'read_only'
+    path: /AppData/VarSeq/User Data/ProjectTemplates/
+
+  - name: overwrite_project
+    label: Overwrite Existing VarSeq Projects
+    help: Select to overwrite existing VarSeq projects
+    type: boolean
+    value: "true"
 
 steps:
   - name: vspipeline
-    description: Run vspipeline
+    description: Run VSPipeline and create a VarSeq project
     type: cmd
     docker:
       image: ${VSPIPELINE_DOCKER_IMAGE}
@@ -33,42 +49,52 @@ steps:
       - |-
         set -euo pipefail
 
+        # Set up environment variables from workspace defaults
         export GOLDENHELIX_USERDATA=${WORKSPACE_DIR}/AppData
-
-        # Start with this one, but we need *.vcf and need to not get the f8, maybe index as part of secondary
-        # Maybe add a 32GB RAM machine config, the large is too large
-
-        # Output the number of detected files
-        echo "Running VSPipeline on ${base_path}"
-        cd "${base_path}"
-
-        # Run VSPipeline: create a project, import the VCFs, download required sources, wait for tasks to complete, get the task list, and save the project
-        rm -rf "${project_name}"
-
         if [ -d "$WORKSPACE_DIR/AppData/VarSeq/User Data" ]; then
           export GH_CRASH_DUMP_DIR="$WORKSPACE_DIR/AppData/VarSeq/User Data"
         fi
         if [ -d "/scratch" ]; then
           export GH_TEMPDIR="/scratch"
         fi
+        
+        # Check if project template exists and matches the current workspace assembly
+        if [ ! -f "$project_template" ]; then
+          echo "Error: Project template file '$project_template' does not exist."
+          exit 1
+        fi
+        if ! grep -q "\"genome\": \"$GH_WORKSPACE_ASSEMBLY\"" "$project_template"; then
+          echo "Error: Project template does not match the current workspace assembly: $GH_WORKSPACE_ASSEMBLY"
+          exit 1
+        fi
 
+        # Create parent directory if it doesn't exist, and check for project directory
+        mkdir -p ${project_directory}
+        if [[ -d "${project_directory}/${project_name}" && "${overwrite_project}" == "false" ]]; then
+          echo "Project directory already exists and overwrite is set to false"
+          exit 1
+        fi
+
+        # If project_name is not provided, use the base directory name
+        if [[ -z "${project_name}" ]]; then
+          project_name=$(basename "${base_path}")
+        fi
+
+        echo "Running VSPipeline and creating VarSeq project"
+        echo "Output path: ${project_directory}/${project_name}"
+
+        cd ${base_path}
         vcf_files=$(find . \( -name "*.trgt.vcf" -o -name "*.vcf.gz" \) -type f | paste -sd ',' - | sed 's/\([^,]*\)/"\1"/g')
 
-        # Find all *.mapped.bam files and upsert them to the SampleManifest catalog
-        find . -name "*.mapped.bam" -type f | while read -r bam_file; do
-          # Convert to absolute path
-          abs_path="$(realpath "$bam_file")"
-          # Remove $WORKSPACE_DIR/ prefix if present
-          rel_path="${abs_path#${WORKSPACE_DIR}/}"
-          # Extract sample name (remove .mapped.bam extension)
-          sample_name="$(basename "$bam_file" .mapped.bam)"
-          gautil client catalog-upsert SampleCatalog Sample="$sample_name" BAMPath="$rel_path" Affected="Affected"
-        done
+        if [ -z "$vcf_files" ]; then
+          echo "Error: No VCF files found in any of the expected folders"
+          exit 1
+        fi
 
-        # Write the commands to create-project.vs-batch using a heredoc
-        cat <<EOF > create-project.vs-batch
+        # Write the VSPipeline commands to a file
+        cat <<EOF > "${project_directory}/${project_name}.vs-batch"
         get_version
-        project_create "${project_name}" "$project_template"
+        project_create "${project_directory}/${project_name}" "${project_template}" ${overwrite_project:+overwrite=true}
         import files="${vcf_files}" append_files_with_same_samples=True sample_fields_catalog=SampleCatalog
         download_required_sources
         task_wait
@@ -80,6 +106,6 @@ steps:
         EOF
 
         /opt/vspipeline/vspipeline \
-            -c batch file=create-project.vs-batch
+            -c batch file="${project_directory}/${project_name}.vs-batch" || { echo "VSPipeline failed"; exit 1; }
 
-        rm -f create-project.vs-batch
+        rm -f "${project_directory}/${project_name}.vs-batch"

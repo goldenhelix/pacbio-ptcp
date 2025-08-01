@@ -19,8 +19,16 @@ const SvInclusionClassifications = [
     "Intermediate",
 ];
 
+const MustCallTandemRepeatIDs = [
+    "FXN", 
+    "EIEE1_ARX", 
+    "PRTS_ARX", 
+    "FMR1", 
+    "AFF2"
+]
+
 // TODO: support gene aliases
-const geneData = [
+const GeneData = [
     {
         "gene": "ABCA3",
         "disorder": "Surfactant metabolism dysfunction, pulmonary 3"
@@ -720,6 +728,9 @@ export default {
                         if (source.algKey === "zygosity") {
                             smallVariantBuffer = await annotateVariants(smallVariantBuffer, source, tableApi, sampleId, recordIds);
                         }
+                        if (source.algKey === "ClinVar-NCBI") {
+                            smallVariantBuffer = await annotateClinVarClassification(smallVariantBuffer, source, tableApi, sampleId, recordIds);
+                        }
                     }
                 }
             }
@@ -792,6 +803,22 @@ export default {
             }
         });
 
+        // Load coverage table
+        let coverageStats = [];
+        for (const table of projectTables) {
+            const sources = await tableApi.projectTableSources({ uuid: table.uuid });
+            for (const source of sources) {
+                if (table.type === "coverage" && source.algKey === "coveragestatistics") {
+                    // load sample data
+                    coverageStats = await loadTableRecords(source, tableApi, sampleId, null)
+                    coverageStats.forEach(region => {
+                        region.Name = region.Name.replace("ID=", "");
+                        region.Region = `${region.SEGMENT_CHR}:${region.SEGMENT_START}-${region.SEGMENT_STOP}`;
+                    });
+                }
+            }
+        }
+
         // Load structural variants
         const pacBioJsonFile = `${inputFolder.value}/${sampleState.sampleName}.qc.json`;
         const structuralVariants = loadPacBioStructuralVariants(pacBioJsonFile, sampleState.sex);
@@ -830,6 +857,7 @@ export default {
             reportedRegionDetails,
             incidentalStrGenotypes: getIncidentalStrMotifs(strVariants, strGenotypes),
             supportingImages: supportingImages,
+            coverageStats: coverageStats,
             citations: getCitations(strGenotypes, structuralVariants),
             repeatThresholds: getRepeatThresholds(strGenotypes),
         };
@@ -1239,6 +1267,13 @@ function fillVariantDetails(variant) {
     variant.interpretation = getVariantInterpretation(variant);
     variant.Zygosity = variant.Zygosity ? variant.Zygosity.replace(" Variant", "") : "Unknown";
 
+    // Set Classification to maximum pathogenicity between ClinVar and Auto-Classifier
+    const clinVarScore = getClassificationScore(variant.clinVarClassification);
+    const autoScore = getClassificationScore(variant.Classification);
+    if (clinVarScore > autoScore) {
+        variant.Classification = variant.clinVarClassification;
+    }
+
     // Transcript and Location
     let relevantGene = variant["GeneName"];
     variant.location = formatTitle(variant["GeneRegionCombined"]);
@@ -1290,7 +1325,7 @@ function fillVariantDetails(variant) {
 }
 
 function getReportedRegionDetails(smallVariants, structuralVariants, strGenotypes) {
-    return geneData.map(gene => {
+    return GeneData.map(gene => {
         const geneVariants = smallVariants.filter(v => v.GeneName === gene.gene);
         const geneStrs = strGenotypes.filter(g => g.gene === gene.gene);
         const geneSvs = structuralVariants.filter(g => g.primaryGene === gene.gene);
@@ -1488,10 +1523,6 @@ async function loadPacBioStrVariants(sourceTable, tableApi, sampleId, recordIds)
     const records = await loadTableRecords(sourceTable, tableApi, sampleId, recordIds);
     const motifFields = ["TRID", "MOTIFS", "MC", "SD"];
     return records.map(record => {
-        if (record["GT"] == null || record["GT"] === "." || record["GT"] === "./." || record["GT"] === "0/0") {
-            return null;
-        }
-
         for (const field of motifFields) {
             if (record[field] == null || record[field].length < 1) {
                 return null;
@@ -1526,6 +1557,22 @@ async function annotateVariants(variants, sourceTable, tableApi, sampleId, recor
         const annotationRecord = records.find(r => r.recordId === variant.recordId);
         if (annotationRecord) {
             return { ...variant, ...annotationRecord };
+        }
+        return variant;
+    });
+}
+
+async function annotateClinVarClassification(variants, sourceTable, tableApi, sampleId, recordIds) {
+    const records = await loadTableRecords(sourceTable, tableApi, sampleId, recordIds);
+    return variants.map(variant => {
+        variant.clinVarClassification = "";
+        const clinVarRecord = records.find(r => r.recordId === variant.recordId);
+        if (clinVarRecord) {
+            const currentScore = getClassificationScore(clinVarRecord.Classification);
+            const previousScore = getClassificationScore(variant.clinVarClassification)
+            if (currentScore >= previousScore) {
+                variant.clinVarClassification = clinVarRecord.Classification;
+            }
         }
         return variant;
     });
@@ -1838,6 +1885,35 @@ function loadMotifPlot(svgFile, gene) {
     };
 }
 
+function addMustCallStrGenotypes(strGenotypes) {
+    MustCallTandemRepeatIDs.forEach(mustCallTrid => {
+        const hasTrid = strGenotypes.some(g => g.trid === mustCallTrid || g.gene == mustCallTrid);
+        if (!hasTrid) {
+            const gene = mustCallTrid.split("_").pop();
+            const geneData = GeneData.find(g => g["gene"] === gene);
+            const disease = geneData ? geneData["disorder"] : "Unknown";
+            strGenotypes.push({
+                gene: gene,
+                trid: mustCallTrid,
+                region: "Unknown",
+                motif: "Unknown",
+                readDepth: "Unknown",
+                motifGenotype1: "?",
+                motifGenotype2: "?",
+                disease: disease,
+                diseaseHtml: disease,
+                inheritance: "Unknown",
+                classificationHtml: "Unknown",
+                classification: "Unknown",
+                pubMedIDs: [],
+                motifPlot: null
+            });
+        }
+    });
+
+    return strGenotypes;
+}
+
 function getStrGenotypes(strVariants) {
     let strGenotypes = [];
     for (const variant of strVariants) {
@@ -1921,6 +1997,8 @@ function getStrGenotypes(strVariants) {
         });
 
     }
+
+    strGenotypes = addMustCallStrGenotypes(strGenotypes);
 
     strGenotypes.sort((a, b) => {
         // Compare classifications in reverse order so order is Pathogenic, Intermediate, Benign
@@ -2006,6 +2084,10 @@ function getRepeatThresholds(strGenotypes) {
     const thresholds = [];
     for (const genotype of strGenotypes) {
         const genotypeThresholds = genotype.countThresholds;
+        if (genotypeThresholds == null) {
+            continue;
+        }
+
         let benignRange = "N/A";
         if (genotypeThresholds.benignMin != null && genotypeThresholds.benignMax != null) {
             benignRange = `${genotypeThresholds.benignMin} - ${genotypeThresholds.benignMax}`;

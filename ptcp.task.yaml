@@ -1,5 +1,6 @@
 name: PureTarget Carrier Pipeline
 description: PureTarget Carrier Pipeline analysis for a single sample
+auto_generate_session_for_account: "{workspaceBot}"
 
 parameters:
   - name: sample_name
@@ -10,14 +11,17 @@ parameters:
   - name: input_folder
     label: Input Folder
     type: directory
+    supports_location_mode: 'read_only'
 
   - name: output_folder
     label: Output Folder
     type: directory
+    supports_location_mode: 'no_append'
 
   - name: ref_fasta
     label: Reference File (FASTA)
     type: file
+    supports_location_mode: 'read_only'
     optional: true
     
   - name: sample_sex
@@ -117,3 +121,32 @@ steps:
         duration=$((SECONDS - start_time))
         echo "${sample_name} processed in $duration seconds"
         
+
+  - name: update_sample_catalog
+    description: Add PTCP Sample Meta Data to Sample Catalog
+    type: cmd
+    docker:
+      image: ${VSPIPELINE_DOCKER_IMAGE}
+    args:
+      - |-
+        set -eu pipefail
+
+        export GOLDENHELIX_USERDATA=${WORKSPACE_DIR}/AppData
+
+        abs_path="${output_folder}/${sample_name}.mapped.bam"
+        output_bam_path="${abs_path#${WORKSPACE_DIR}/}"
+        echo "Updating sample $sample_name with BAM: ${output_bam_path}"
+        
+        # Set sex parameter based on sample_sex value
+        if [ "$sample_sex" = "M" ]; then
+          sex_param="Sex=Male"
+        else
+          sex_param="Sex=Female"
+        fi
+        
+        gautil client catalog-upsert SampleCatalog \
+          Sample="$sample_name" \
+          BAMPath="$output_bam_path" \
+          $sex_param || \
+          { echo "Failed to update sample catalog"; exit 1; }
+        echo "Updated sample $sample_name with BAM: ${output_bam_path}"
