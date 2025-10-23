@@ -83,7 +83,7 @@ steps:
         echo "Running VSPipeline and creating VarSeq project"
         echo "Output path: ${project_directory}/${project_name}"
 
-        cd ${base_path}
+        cd "${base_path}"
         vcf_files=$(find . \( -name "*.trgt.vcf" -o -name "*.vcf.gz" \) -type f | paste -sd ',' - | sed 's/\([^,]*\)/"\1"/g')
 
         if [ -z "$vcf_files" ]; then

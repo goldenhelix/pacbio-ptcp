@@ -58,7 +58,7 @@ steps:
     description: Run ptcp
     type: cmd
     docker:
-      image: registry.goldenhelix.com/public/ptcp:v2.2.0
+      image: registry.goldenhelix.com/public/ptcp:v3.1.2
     args:
       - |-
         set -euo pipefail

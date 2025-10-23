@@ -34,11 +34,17 @@ gba:
   genes: GBA1
   realign_region: 1:155204137-155211510
   extract_regions: 1:155181171-155192566 1:155202617-155214056
-  gene2_region:  1:155183510-155189296
+  gene2_region: 1:155183510-155189296
   check_nm: 0.2
   use_r2k: True
   noisy_region: [[155206374, 155206963], [155208738, 155209373], [155209951, 155210280], [155211191, 155211691]]
   gene1_cn2: True
+  deletion1_size: 55
+  deletion1_name: "155205540_del_55"
+  del1_3p_pos1: 155205540
+  del1_3p_pos2: 155205541
+  del1_5p_pos1: 155205595
+  del1_5p_pos2: 155205596
 hba:
   genes: HBA1,HBA2
   realign_region: 16:221799-225499
@@ -54,9 +60,13 @@ hba:
 f8inv22:
   realign_region: X:154106528-154120466
   extract_regions: X:154105528-154121464 X:154682371-154695489
+  clip_5p_positions: [154109090]
+  clip_3p_positions: [154118602]
 f8inv1:
   realign_region: X:154233673-154238755
   extract_regions: X:154232673-154239753 X:154372752-154379062
+  clip_5p_positions: [154234378]
+  clip_3p_positions: [154235430]
 rpgr:
   realign_region: X:38142937-38148014
   extract_regions: X:38142937-38148014

@@ -92,7 +92,7 @@ steps:
     description: Run secondary analysis
     type: cmd
     docker:
-      image: registry.goldenhelix.com/public/sentieon:202503
+      image: registry.goldenhelix.com/public/sentieon:202503.01
     args:
       - |-
         set -exvuo pipefail
@@ -169,6 +169,7 @@ steps:
         sentieon-cli dnascope-longread \
           -r "$ref_fasta" \
           -i "$local_input_file" \
+          --skip-cnv \
           -m "$model_file" \
           -t $AGENT_CPU_CORES \
           $([ -n "$bed_file" ] && echo "-b $bed_file") \
