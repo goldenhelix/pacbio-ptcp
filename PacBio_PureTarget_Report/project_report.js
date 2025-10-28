@@ -1601,21 +1601,29 @@ function classifyMotifCount(count, strVariant) {
     const intermediateMin = strVariant["IntermediateMin"];
     const intermediateMax = strVariant["IntermediateMax"];
 
-    if (pathogenicMin != null && count >= pathogenicMin) {
-        if (pathogenicMax != null && count <= pathogenicMax) {
-            return "Pathogenic";
-        }
-    }
-    if (intermediateMin != null && count >= intermediateMin) {
-        if (intermediateMax != null && count <= intermediateMax) {
-            return "Intermediate";
-        }
-    }
-    if (benignMin != null && count >= benignMin) {
-        if (benignMax != null && count <= benignMax) {
+    // If there is a benign min, then there should always be a benign max
+    if (benignMin != null && benignMax != null && count >= benignMin) {
+        const expansionIsNotPathogenic = pathogenicMax != null && benignMax > pathogenicMax;
+        if (expansionIsNotPathogenic || count <= benignMax) {
             return "Benign";
         }
     }
+
+    // If there is a pathogenic min, then there should always be a pathogenic max
+    if (pathogenicMin != null && pathogenicMax != null && count >= pathogenicMin) {
+        const expansionIsPathogenic = benignMax == null || benignMax < pathogenicMax;
+        if (expansionIsPathogenic || count <= pathogenicMax) {
+            return "Pathogenic";
+        }
+    }
+
+    // If there is a intermediate min, then there should always be a intermediate max
+    if (intermediateMax != null && intermediateMin != null && count >= intermediateMin) {
+        if (count <= intermediateMax) {
+            return "Intermediate";
+        }
+    }
+
     return "Unknown";
 }
 
