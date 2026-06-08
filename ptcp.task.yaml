@@ -90,6 +90,19 @@ steps:
         echo "Copying input files to workdir..."
         cp "$input_folder/${sample_name}.bam"* . || { echo "Failed to copy input files to workdir"; exit 1; }
 
+        # Paraphase (inside ptcp_direct.sh) builds shell commands with the reference path
+        # interpolated UNQUOTED, so a reference path containing a space (e.g. the VarSeq
+        # default ".../AppData/Common Data/Assemblies/...") word-splits, samtools faidx
+        # fails, the per-gene reference (cyp21_ref.fa) is empty, and pysam.faidx aborts with
+        # "[faidx] File truncated at line 1". Expose the reference under a space-free
+        # directory (basename preserved so the .fai sidecar still resolves) and use that.
+        ref_stage_dir="/scratch/ref"
+        mkdir -p "$ref_stage_dir"
+        ref_base="$(basename "$ref_fasta")"
+        ln -sf "$ref_fasta" "$ref_stage_dir/$ref_base"
+        if [ -f "${ref_fasta}.fai" ]; then ln -sf "${ref_fasta}.fai" "$ref_stage_dir/${ref_base}.fai"; fi
+        ref_fasta="$ref_stage_dir/$ref_base"
+
         mkdir -p output || { echo "Failed to create scratch output directory"; exit 1; }
 
         start_time=$SECONDS
@@ -108,7 +121,7 @@ steps:
         # Sort and index the .trgt.vcf file
         bcftools sort -T /scratch/ -o "output/${sample_name}.trgt.vcf.gz" -O z "output/${sample_name}.trgt.vcf" || { echo "Failed to sort VCF"; exit 1; }
         rm "output/${sample_name}.trgt.vcf" || { echo "Failed to remove uncompressed VCF"; exit 1; }
-        tabix -p vcf "output/${sample_name}.trgt.vcf.gz" || { echo "Failed to sort and index VCF"; exit 1; }
+        tabix -f -p vcf "output/${sample_name}.trgt.vcf.gz" || { echo "Warning: Failed to index VCF file"; if [ ! -f "output/${sample_name}.trgt.vcf.gz.tbi" ]; then echo "Index file does not exist, exiting..."; exit 1; else echo "Index file exists, continuing..."; fi; }
 
         # Unzip every *_allele.trgt_plots.zip file in the outputs/ folder
         mkdir output/motifs_allele.trgt_plots
