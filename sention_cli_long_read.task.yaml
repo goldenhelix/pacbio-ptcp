@@ -133,6 +133,20 @@ steps:
         if [ -z "$ref_fasta" ]; then
           ref_fasta="$WORKSPACE_DIR/${RESOURCES_PATH}/${REFERENCE_PATH}"
         fi
+
+        # Expose the reference under a space-free directory (basename preserved so the
+        # .fai/.dict sidecars still resolve). Tools that build internal shell commands with
+        # an unquoted reference path break on spaces (e.g. the VarSeq default
+        # ".../AppData/Common Data/Assemblies/..."). Keeps this stage robust to any ref path.
+        ref_stage_dir="/scratch/ref"
+        mkdir -p "$ref_stage_dir"
+        ref_base="$(basename "$ref_fasta")"
+        ln -sf "$ref_fasta" "$ref_stage_dir/$ref_base"
+        for sib in "${ref_fasta}.fai" "${ref_fasta}.dict" "${ref_fasta%.*}.dict" "${ref_fasta}.gzi"; do
+          if [ -f "$sib" ]; then ln -sf "$sib" "$ref_stage_dir/$(basename "$sib")"; fi
+        done
+        ref_fasta="$ref_stage_dir/$ref_base"
+
         if [ -z "$model_base_path" ]; then
           model_base_path="$WORKSPACE_DIR/${RESOURCES_PATH}/sentieon_models"
         fi
